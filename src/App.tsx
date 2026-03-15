@@ -728,7 +728,8 @@ type GalleryManifest = {
   items: GalleryItem[];
 };
 
-const GALLERY_MANIFEST_URL = "/gallery/manifest.json";
+const GALLERY_BASE_URL = `${import.meta.env.BASE_URL}gallery/`;
+const GALLERY_MANIFEST_URL = `${GALLERY_BASE_URL}manifest.json`;
 
 const base64ToBytes = (b64: string) => {
   const binary = atob(b64);
@@ -818,7 +819,7 @@ const Gallery = () => {
   }, [decryptedUrls]);
 
   const decryptItem = async (key: CryptoKey, item: GalleryItem) => {
-    const res = await fetch(`/gallery/${item.src}`, { cache: "no-store" });
+    const res = await fetch(`${GALLERY_BASE_URL}${item.src}`, { cache: "no-store" });
     if (!res.ok) {
       throw new Error("Nepodařilo se načíst soubor.");
     }
