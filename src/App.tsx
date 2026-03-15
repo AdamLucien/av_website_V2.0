@@ -713,6 +713,8 @@ type GalleryItem = {
   src: string;
   iv: string;
   mime: string;
+  featured?: boolean;
+  order?: number;
 };
 
 type GalleryManifest = {
@@ -770,6 +772,19 @@ const Gallery = () => {
   const [manifestError, setManifestError] = useState("");
   const [unlocking, setUnlocking] = useState(false);
   const [decryptedUrls, setDecryptedUrls] = useState<Record<string, string>>({});
+
+  const featuredItems = useMemo(
+    () => items.filter((item) => item.featured).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [items]
+  );
+  const videoItems = useMemo(
+    () => items.filter((item) => item.type === "video" && !item.featured).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [items]
+  );
+  const photoItems = useMemo(
+    () => items.filter((item) => item.type === "image" && !item.featured).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [items]
+  );
 
   useEffect(() => {
     let isActive = true;
@@ -880,55 +895,164 @@ const Gallery = () => {
           </form>
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 auto-rows-[200px] md:auto-rows-[250px]">
-          {items.map((item, idx) => {
-            const itemUrl = decryptedUrls[String(item.id)];
-            if (!itemUrl) return null;
-            return (
-            <motion.div
-              key={item.id}
-              initial={{ opacity: 0, scale: 0.9 }}
-              whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              transition={{ delay: idx * 0.1 }}
-              whileHover={{ y: -5, transition: { duration: 0.2 } }}
-              onClick={() => setSelectedItem({ ...item, url: itemUrl })}
-              className={`relative group cursor-pointer overflow-hidden rounded-[2rem] shadow-lg bg-slate-100 ${
-                item.size === 'large' ? 'col-span-2 row-span-2' : 
-                item.size === 'medium' ? 'col-span-2 row-span-1' : 
-                'col-span-1 row-span-1'
-              }`}
-            >
-              {item.type === 'image' ? (
-                <img 
-                  src={itemUrl} 
-                  alt={item.title}
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                />
-              ) : (
-                <div className="w-full h-full relative">
-                  <video 
-                    src={itemUrl} 
-                    muted 
-                    loop 
-                    playsInline
-                    autoPlay
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
-                    <Play className="w-12 h-12 text-white/80 fill-white/20 backdrop-blur-sm rounded-full p-3 border border-white/30" />
-                  </div>
-                </div>
-              )}
-              
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-6">
-                <p className="text-white font-serif italic text-lg transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
-                  {item.title}
-                </p>
+        <div className="space-y-16">
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-2xl font-serif text-slate-800">Nejlepší momenty</h3>
+                <p className="text-slate-500 text-sm">Vybrané střípky, které si zaslouží zůstat navždy</p>
               </div>
-            </motion.div>
-          )})}
+              <span className="text-xs uppercase tracking-widest font-bold text-rose-400">{featuredItems.length} momentů</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 auto-rows-[200px] md:auto-rows-[250px]">
+              {featuredItems.map((item, idx) => {
+                const itemUrl = decryptedUrls[String(item.id)];
+                if (!itemUrl) return null;
+                return (
+                  <motion.div
+                    key={item.id}
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    whileInView={{ opacity: 1, scale: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: idx * 0.06 }}
+                    whileHover={{ y: -5, transition: { duration: 0.2 } }}
+                    onClick={() => setSelectedItem({ ...item, url: itemUrl })}
+                    className={`relative group cursor-pointer overflow-hidden rounded-[2rem] shadow-lg bg-slate-100 ${
+                      item.size === 'large' ? 'col-span-2 row-span-2' : 
+                      item.size === 'medium' ? 'col-span-2 row-span-1' : 
+                      'col-span-1 row-span-1'
+                    }`}
+                  >
+                    {item.type === 'image' ? (
+                      <img 
+                        src={itemUrl} 
+                        alt={item.title}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                      />
+                    ) : (
+                      <div className="w-full h-full relative">
+                        <video 
+                          src={itemUrl} 
+                          muted 
+                          loop 
+                          playsInline
+                          autoPlay
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                          <Play className="w-12 h-12 text-white/80 fill-white/20 backdrop-blur-sm rounded-full p-3 border border-white/30" />
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-6">
+                      <p className="text-white font-serif italic text-lg transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+                        {item.title}
+                      </p>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-2xl font-serif text-slate-800">Videa</h3>
+                <p className="text-slate-500 text-sm">Všechny pohyblivé vzpomínky na jednom místě</p>
+              </div>
+              <span className="text-xs uppercase tracking-widest font-bold text-rose-400">{videoItems.length} videí</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 auto-rows-[200px] md:auto-rows-[250px]">
+              {videoItems.map((item, idx) => {
+                const itemUrl = decryptedUrls[String(item.id)];
+                if (!itemUrl) return null;
+                return (
+                  <motion.div
+                    key={item.id}
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    whileInView={{ opacity: 1, scale: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: idx * 0.04 }}
+                    whileHover={{ y: -5, transition: { duration: 0.2 } }}
+                    onClick={() => setSelectedItem({ ...item, url: itemUrl })}
+                    className={`relative group cursor-pointer overflow-hidden rounded-[2rem] shadow-lg bg-slate-100 ${
+                      item.size === 'large' ? 'col-span-2 row-span-2' : 
+                      item.size === 'medium' ? 'col-span-2 row-span-1' : 
+                      'col-span-1 row-span-1'
+                    }`}
+                  >
+                    <div className="w-full h-full relative">
+                      <video 
+                        src={itemUrl} 
+                        muted 
+                        loop 
+                        playsInline
+                        autoPlay
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                        <Play className="w-12 h-12 text-white/80 fill-white/20 backdrop-blur-sm rounded-full p-3 border border-white/30" />
+                      </div>
+                    </div>
+                    
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-6">
+                      <p className="text-white font-serif italic text-lg transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+                        {item.title}
+                      </p>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-2xl font-serif text-slate-800">Fotky</h3>
+                <p className="text-slate-500 text-sm">Všechny ostatní vzpomínky v obraze</p>
+              </div>
+              <span className="text-xs uppercase tracking-widest font-bold text-rose-400">{photoItems.length} fotek</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 auto-rows-[200px] md:auto-rows-[250px]">
+              {photoItems.map((item, idx) => {
+                const itemUrl = decryptedUrls[String(item.id)];
+                if (!itemUrl) return null;
+                return (
+                  <motion.div
+                    key={item.id}
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    whileInView={{ opacity: 1, scale: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: idx * 0.03 }}
+                    whileHover={{ y: -5, transition: { duration: 0.2 } }}
+                    onClick={() => setSelectedItem({ ...item, url: itemUrl })}
+                    className={`relative group cursor-pointer overflow-hidden rounded-[2rem] shadow-lg bg-slate-100 ${
+                      item.size === 'large' ? 'col-span-2 row-span-2' : 
+                      item.size === 'medium' ? 'col-span-2 row-span-1' : 
+                      'col-span-1 row-span-1'
+                    }`}
+                  >
+                    <img 
+                      src={itemUrl} 
+                      alt={item.title}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                    />
+                    
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-6">
+                      <p className="text-white font-serif italic text-lg transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+                        {item.title}
+                      </p>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 

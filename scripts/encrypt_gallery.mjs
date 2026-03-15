@@ -60,6 +60,8 @@ const main = async () => {
       title: item.title,
       type: item.type,
       size: item.size,
+      featured: Boolean(item.featured),
+      order: Number.isFinite(item.order) ? item.order : undefined,
       src: outName,
       iv: iv.toString("base64"),
       mime: getMime(item.file)
