@@ -30,8 +30,6 @@ import {
 } from 'lucide-react';
 
 // --- NDATA: Updated with provided narrative and letter ---
-// Simple client-side password for gallery access (change to your own).
-const GALLERY_PASSWORD = "laska2024";
 
 const NDATA = {
   lang: "cs",
@@ -156,17 +154,7 @@ Náš vztah přežil to nejtěžší a díky tomu je teď tak čistý a skutečn
 Miluju Tě. Za to, čím jsme si prošli, i za to, co nás teprve čeká. Navždy.
 
 Tvůj Adam`
-  },
-  gallery: [
-    { id: 1, type: 'image', url: 'https://picsum.photos/seed/love1/800/1000', title: 'První společné léto', size: 'large' },
-    { id: 2, type: 'image', url: 'https://picsum.photos/seed/love2/800/600', title: 'Smích v dešti', size: 'small' },
-    { id: 3, type: 'video', url: 'https://assets.mixkit.co/videos/preview/mixkit-couple-walking-in-the-park-holding-hands-4444-large.mp4', title: 'Naše procházky', size: 'medium' },
-    { id: 4, type: 'image', url: 'https://picsum.photos/seed/love3/800/800', title: 'Tiché momenty', size: 'medium' },
-    { id: 5, type: 'image', url: 'https://picsum.photos/seed/love4/600/800', title: 'Nekonečné hovory', size: 'small' },
-    { id: 6, type: 'video', url: 'https://assets.mixkit.co/videos/preview/mixkit-young-couple-sitting-on-the-beach-at-sunset-4445-large.mp4', title: 'Západy slunce', size: 'large' },
-    { id: 7, type: 'image', url: 'https://picsum.photos/seed/love5/800/600', title: 'Tvé oči', size: 'medium' },
-    { id: 8, type: 'image', url: 'https://picsum.photos/seed/love6/800/1000', title: 'Společné sny', size: 'small' },
-  ]
+  }
 };
 
 // --- Components ---
@@ -717,24 +705,141 @@ const Typewriter = ({ text, delay = 30 }: { text: string, delay?: number }) => {
   return <span>{displayedText}</span>;
 };
 
+type GalleryItem = {
+  id: number | string;
+  title: string;
+  type: "image" | "video";
+  size: "large" | "medium" | "small";
+  src: string;
+  iv: string;
+  mime: string;
+};
+
+type GalleryManifest = {
+  version: number;
+  salt: string;
+  kdf: {
+    name: "PBKDF2";
+    hash: "SHA-256";
+    iterations: number;
+  };
+  items: GalleryItem[];
+};
+
+const GALLERY_MANIFEST_URL = "/gallery/manifest.json";
+
+const base64ToBytes = (b64: string) => {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+};
+
+const deriveGalleryKey = async (password: string, saltB64: string, iterations: number) => {
+  const enc = new TextEncoder();
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(password),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: base64ToBytes(saltB64),
+      iterations,
+      hash: "SHA-256"
+    },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["decrypt"]
+  );
+};
+
 const Gallery = () => {
   const [selectedItem, setSelectedItem] = useState<any>(null);
-  const [isUnlocked, setIsUnlocked] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.sessionStorage.getItem("gallery_unlocked") === "1";
-  });
+  const [manifest, setManifest] = useState<GalleryManifest | null>(null);
+  const [items, setItems] = useState<GalleryItem[]>([]);
+  const [isUnlocked, setIsUnlocked] = useState(false);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [manifestError, setManifestError] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
+  const [decryptedUrls, setDecryptedUrls] = useState<Record<string, string>>({});
 
-  const handleUnlock = (e: React.FormEvent) => {
+  useEffect(() => {
+    let isActive = true;
+    const loadManifest = async () => {
+      try {
+        const res = await fetch(GALLERY_MANIFEST_URL, { cache: "no-store" });
+        if (!res.ok) {
+          throw new Error("Manifest nebyl nalezen.");
+        }
+        const data = (await res.json()) as GalleryManifest;
+        if (isActive) {
+          setManifest(data);
+          setItems(data.items || []);
+        }
+      } catch (err) {
+        if (isActive) {
+          setManifestError("Galerie není připravená. Chybí šifrovaná data.");
+        }
+      }
+    };
+    loadManifest();
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      Object.values(decryptedUrls).forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [decryptedUrls]);
+
+  const decryptItem = async (key: CryptoKey, item: GalleryItem) => {
+    const res = await fetch(`/gallery/${item.src}`, { cache: "no-store" });
+    if (!res.ok) {
+      throw new Error("Nepodařilo se načíst soubor.");
+    }
+    const encrypted = await res.arrayBuffer();
+    const iv = base64ToBytes(item.iv);
+    const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, encrypted);
+    const blob = new Blob([decrypted], { type: item.mime });
+    return URL.createObjectURL(blob);
+  };
+
+  const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (password.trim() === GALLERY_PASSWORD) {
-      window.sessionStorage.setItem("gallery_unlocked", "1");
+    setError("");
+    if (!manifest) {
+      setError("Galerie není připravená.");
+      return;
+    }
+    if (!password.trim()) {
+      setError("Zadej heslo.");
+      return;
+    }
+    setUnlocking(true);
+    try {
+      const key = await deriveGalleryKey(password.trim(), manifest.salt, manifest.kdf.iterations);
+      const urls: Record<string, string> = {};
+      for (const item of items) {
+        const url = await decryptItem(key, item);
+        urls[String(item.id)] = url;
+      }
+      setDecryptedUrls(urls);
       setIsUnlocked(true);
       setPassword("");
-      setError("");
-    } else {
-      setError("Nesprávné heslo. Zkus to znovu.");
+    } catch (err) {
+      setError("Nesprávné heslo nebo poškozená data.");
+    } finally {
+      setUnlocking(false);
     }
   };
 
@@ -752,6 +857,9 @@ const Gallery = () => {
           </div>
           <h3 className="text-2xl font-serif text-slate-800 mb-2">Galerie je uzamčená</h3>
           <p className="text-slate-500 text-sm mb-6">Zadej heslo a otevři naše společné vzpomínky.</p>
+          {manifestError && (
+            <p className="text-rose-600 text-sm mb-4">{manifestError}</p>
+          )}
           <form onSubmit={handleUnlock} className="space-y-3">
             <input
               type="password"
@@ -759,19 +867,24 @@ const Gallery = () => {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Heslo"
               className="w-full rounded-full px-5 py-3 text-center border border-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-300"
+              disabled={!!manifestError || unlocking}
             />
             <button
               type="submit"
-              className="w-full rounded-full bg-rose-500 text-white font-semibold py-3 shadow-lg shadow-rose-200 hover:bg-rose-600 transition-colors"
+              disabled={!!manifestError || unlocking}
+              className="w-full rounded-full bg-rose-500 text-white font-semibold py-3 shadow-lg shadow-rose-200 hover:bg-rose-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Odemknout galerii
+              {unlocking ? "Otevírám..." : "Odemknout galerii"}
             </button>
             {error && <p className="text-rose-600 text-sm">{error}</p>}
           </form>
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 auto-rows-[200px] md:auto-rows-[250px]">
-          {NDATA.gallery.map((item, idx) => (
+          {items.map((item, idx) => {
+            const itemUrl = decryptedUrls[String(item.id)];
+            if (!itemUrl) return null;
+            return (
             <motion.div
               key={item.id}
               initial={{ opacity: 0, scale: 0.9 }}
@@ -779,7 +892,7 @@ const Gallery = () => {
               viewport={{ once: true }}
               transition={{ delay: idx * 0.1 }}
               whileHover={{ y: -5, transition: { duration: 0.2 } }}
-              onClick={() => setSelectedItem(item)}
+              onClick={() => setSelectedItem({ ...item, url: itemUrl })}
               className={`relative group cursor-pointer overflow-hidden rounded-[2rem] shadow-lg bg-slate-100 ${
                 item.size === 'large' ? 'col-span-2 row-span-2' : 
                 item.size === 'medium' ? 'col-span-2 row-span-1' : 
@@ -788,7 +901,7 @@ const Gallery = () => {
             >
               {item.type === 'image' ? (
                 <img 
-                  src={item.url} 
+                  src={itemUrl} 
                   alt={item.title}
                   referrerPolicy="no-referrer"
                   className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
@@ -796,7 +909,7 @@ const Gallery = () => {
               ) : (
                 <div className="w-full h-full relative">
                   <video 
-                    src={item.url} 
+                    src={itemUrl} 
                     muted 
                     loop 
                     playsInline
@@ -815,7 +928,7 @@ const Gallery = () => {
                 </p>
               </div>
             </motion.div>
-          ))}
+          )})}
         </div>
       )}
 
