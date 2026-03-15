@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Heart, 
@@ -773,6 +773,9 @@ const Gallery = () => {
   const [manifestError, setManifestError] = useState("");
   const [unlocking, setUnlocking] = useState(false);
   const [decryptedUrls, setDecryptedUrls] = useState<Record<string, string>>({});
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [decryptProgress, setDecryptProgress] = useState({ done: 0, total: 0 });
+  const decryptTokenRef = useRef(0);
 
   const featuredItems = useMemo(
     () => items.filter((item) => item.featured).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
@@ -785,6 +788,10 @@ const Gallery = () => {
   const photoItems = useMemo(
     () => items.filter((item) => item.type === "image" && !item.featured).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
     [items]
+  );
+  const decryptOrder = useMemo(
+    () => [...featuredItems, ...videoItems, ...photoItems],
+    [featuredItems, videoItems, photoItems]
   );
 
   useEffect(() => {
@@ -830,6 +837,54 @@ const Gallery = () => {
     return URL.createObjectURL(blob);
   };
 
+  const startBackgroundDecrypt = (key: CryptoKey) => {
+    const list = decryptOrder;
+    if (!list.length) {
+      setIsDecrypting(false);
+      setDecryptProgress({ done: 0, total: 0 });
+      return;
+    }
+    const token = decryptTokenRef.current + 1;
+    decryptTokenRef.current = token;
+    const total = list.length;
+    let index = 0;
+    let completed = 0;
+    const concurrency = Math.min(4, total);
+
+    setIsDecrypting(true);
+    setDecryptProgress({ done: 0, total });
+
+    const runNext = async (): Promise<void> => {
+      const currentIndex = index;
+      if (currentIndex >= total) return;
+      const item = list[currentIndex];
+      index += 1;
+      try {
+        const url = await decryptItem(key, item);
+        if (decryptTokenRef.current !== token) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        setDecryptedUrls((prev) => ({ ...prev, [String(item.id)]: url }));
+      } catch (err) {
+        // Skip failed items without blocking the rest.
+      } finally {
+        if (decryptTokenRef.current !== token) return;
+        completed += 1;
+        setDecryptProgress({ done: completed, total });
+        if (index < total) {
+          await runNext();
+        } else if (completed >= total) {
+          setIsDecrypting(false);
+        }
+      }
+    };
+
+    for (let i = 0; i < concurrency; i += 1) {
+      void runNext();
+    }
+  };
+
   const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -844,17 +899,21 @@ const Gallery = () => {
     setUnlocking(true);
     try {
       const key = await deriveGalleryKey(password.trim(), manifest.salt, manifest.kdf.iterations);
-      const urls: Record<string, string> = {};
-      for (const item of items) {
-        const url = await decryptItem(key, item);
-        urls[String(item.id)] = url;
+      const probeItem = items.find((item) => item.type === "image") || items[0];
+      if (!probeItem) {
+        setError("Galerie je prázdná.");
+        setUnlocking(false);
+        return;
       }
-      setDecryptedUrls(urls);
+      const probeUrl = await decryptItem(key, probeItem);
+      URL.revokeObjectURL(probeUrl);
+
       setIsUnlocked(true);
       setPassword("");
+      setUnlocking(false);
+      startBackgroundDecrypt(key);
     } catch (err) {
       setError("Nesprávné heslo nebo poškozená data.");
-    } finally {
       setUnlocking(false);
     }
   };
@@ -897,6 +956,11 @@ const Gallery = () => {
         </div>
       ) : (
         <div className="space-y-16">
+          {isDecrypting && (
+            <div className="text-center text-xs uppercase tracking-widest font-semibold text-rose-400">
+              Načítám galerii {decryptProgress.done}/{decryptProgress.total}
+            </div>
+          )}
           <div>
             <div className="flex items-center justify-between mb-6">
               <div>
